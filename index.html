@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Voice Clone Detector</title>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#EDF0F2;--panel:#fff;--ink:#13202B;--muted:#5B6B78;--line:#D3DAE0;--human:#12806A;--warn:#B77A06;--fake:#C7254E;--onfake:#fff}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0F1A22;--panel:#16232D;--ink:#E8EEF2;--muted:#93A3AF;--line:#2A3B47;--human:#3FC5A3;--warn:#E5B143;--fake:#FF5C80;--onfake:#1a0710}}
+:root[data-theme="dark"]{--bg:#0F1A22;--panel:#16232D;--ink:#E8EEF2;--muted:#93A3AF;--line:#2A3B47;--human:#3FC5A3;--warn:#E5B143;--fake:#FF5C80;--onfake:#1a0710}
+*{box-sizing:border-box}
+:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--ink);font:400 16px/1.5 "Instrument Sans",system-ui,-apple-system,"Segoe UI",sans-serif}
+.wrap{max-width:1040px;margin:0 auto;padding:28px 18px 40px}
+h1{font-size:clamp(1.6rem,4vw,2.3rem);line-height:1.1;margin:0 0 6px;font-weight:700;letter-spacing:-.02em}
+.sub{color:var(--muted);margin:0 0 22px;max-width:62ch}
+.bar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:16px}
+button,.file{font:600 .95rem "Instrument Sans",system-ui,sans-serif;border:1px solid var(--ink);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:8px;cursor:pointer}
+button.alt,.file{background:transparent;color:var(--ink);border-color:var(--line)}
+button:focus-visible,.file:focus-within,input:focus-visible{outline:3px solid var(--warn);outline-offset:2px}
+.file input{position:absolute;opacity:0;width:1px;height:1px}
+label.chk{display:flex;gap:6px;align-items:center;color:var(--muted);font-size:.9rem}
+#alert{display:none;background:var(--fake);color:var(--onfake);border-radius:10px;padding:14px 18px;margin-bottom:16px;font-weight:600}
+#alert span{display:block;font-weight:400;margin-top:2px}
+.grid{display:grid;grid-template-columns:1.5fr 1fr;gap:16px}
+@media(max-width:820px){.grid{grid-template-columns:1fr}}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px}
+.verdict{display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap}
+#vtext{font-size:clamp(1.5rem,4.2vw,2.2rem);font-weight:700;letter-spacing:-.02em;color:var(--muted)}
+#vnum{font-size:1rem;color:var(--muted);font-variant-numeric:tabular-nums}
+#status{color:var(--muted);font-size:.92rem;margin:4px 0 14px;min-height:1.4em}
+canvas{width:100%;display:block;border:1px solid var(--line);border-radius:8px;background:transparent}
+.cap{font-size:.82rem;color:var(--muted);margin:6px 0 14px}
+h2{font-size:1rem;margin:0 0 4px}
+.ind{margin:14px 0}
+.ind .row{display:flex;justify-content:space-between;gap:8px;font-size:.92rem}
+.ind .val{color:var(--muted);font-variant-numeric:tabular-nums}
+.meter{height:8px;background:var(--line);border-radius:4px;overflow:hidden;margin-top:5px}
+.meter i{display:block;height:100%;width:0;background:var(--muted);transition:width .3s}
+.hint{font-size:.8rem;color:var(--muted);margin:3px 0 0}
+.note{margin-top:18px;font-size:.85rem;color:var(--muted);max-width:80ch}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Voice clone detector</h1>
+  <p class="sub">Listens to a voice in real time and warns you when it sounds synthetic or cloned. Speak into your microphone, or check a recording.</p>
+
+  <div class="bar">
+    <button id="mic">Start listening</button>
+    <label class="file">Check an audio file<input id="file" type="file" accept="audio/*"></label>
+    <button id="demo" class="alt">Play synthetic test voice</button>
+    <button id="stop" class="alt" hidden>Stop</button>
+    <label class="chk"><input type="checkbox" id="snd" checked> Sound alert</label>
+  </div>
+
+  <div id="alert" role="alert">Possible cloned voice detected
+    <span>Don't share codes, passwords or money. Hang up and call back on a number you already know.</span></div>
+
+  <div class="grid">
+    <section class="panel" aria-label="Live result">
+      <div class="verdict"><div id="vtext">Waiting for audio</div><div id="vnum"></div></div>
+      <div id="status" aria-live="polite">Start listening or load a file to begin.</div>
+      <canvas id="spec" width="600" height="140" aria-label="Live spectrogram"></canvas>
+      <p class="cap">Spectrogram, last 12 seconds (0 to 8 kHz)</p>
+      <canvas id="trace" width="600" height="90" aria-label="Synthetic likelihood over time"></canvas>
+      <p class="cap">Synthetic likelihood over time. Dashed lines mark 35 and 62.</p>
+    </section>
+
+    <section class="panel" aria-label="Signals">
+      <h2>What the detector hears</h2>
+      <p class="hint">Longer bars point toward a synthetic voice.</p>
+      <div class="ind" data-k="pv"><div class="row"><span>Pitch movement</span><span class="val">-</span></div><div class="meter"><i></i></div><p class="hint">Real speech rises and falls. Clones are often too steady.</p></div>
+      <div class="ind" data-k="jt"><div class="row"><span>Pitch micro-variation</span><span class="val">-</span></div><div class="meter"><i></i></div><p class="hint">Natural voices wobble slightly from moment to moment.</p></div>
+      <div class="ind" data-k="dy"><div class="row"><span>Loudness dynamics</span><span class="val">-</span></div><div class="meter"><i></i></div><p class="hint">People vary stress and volume; generated speech is often even.</p></div>
+      <div class="ind" data-k="hf"><div class="row"><span>High-frequency detail</span><span class="val">-</span></div><div class="meter"><i></i></div><p class="hint">Breath and fricatives add energy above 7 kHz.</p></div>
+      <div class="ind" data-k="fl"><div class="row"><span>Background noise in pauses</span><span class="val">-</span></div><div class="meter"><i></i></div><p class="hint">Real rooms never go fully silent.</p></div>
+    </section>
+  </div>
+
+  <p class="note">This is a signal-based screening tool, not proof. Phone compression, noise suppression and monotone speakers can raise the score, and a high-quality clone can lower it. A production detector would add a trained deep-learning model. Audio is analysed in your browser and never uploaded.</p>
+</div>
+
+<script>
+const $=id=>document.getElementById(id), clamp=(x,a=0,b=1)=>Math.max(a,Math.min(b,x));
+const N=2048, td=new Float32Array(N), fd=new Float32Array(N/2);
+let ac,an,timer,stops=[],H,hist=[],score=null,hits=0,ticks=0,alerted=false;
+const css=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const sp=$('spec'),sx=sp.getContext('2d'),tr=$('trace'),tx=tr.getContext('2d');
+
+function reset(){H={p:[],r:[],hf:[],fl:[]};hist=[];score=null;hits=0;ticks=0;alerted=false;
+  sx.clearRect(0,0,sp.width,sp.height);tx.clearRect(0,0,tr.width,tr.height);
+  $('alert').style.display='none';setVerdict(null);
+  document.querySelectorAll('.ind').forEach(e=>{e.querySelector('.val').textContent='-';e.querySelector('i').style.width='0'});}
+function ctx(){if(!ac){ac=new (window.AudioContext||window.webkitAudioContext)();an=ac.createAnalyser();an.fftSize=N;an.smoothingTimeConstant=0}
+  if(ac.state==='suspended')ac.resume();}
+function begin(msg){reset();$('status').textContent=msg;$('stop').hidden=false;clearInterval(timer);timer=setInterval(tick,40);}
+function stop(){clearInterval(timer);stops.forEach(f=>{try{f()}catch(e){}});stops=[];$('stop').hidden=true;
+  if($('status').textContent.startsWith('Listening')||$('status').textContent.startsWith('Playing')||$('status').textContent.startsWith('Checking'))$('status').textContent='Stopped.';}
+
+$('mic').onclick=async()=>{
+  try{ctx();const s=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false}});
+    const n=ac.createMediaStreamSource(s);n.connect(an);stop();stops.push(()=>{s.getTracks().forEach(t=>t.stop());n.disconnect()});
+    begin('Listening on your microphone. Keep talking for a few seconds.');
+  }catch(e){$('status').textContent='Microphone unavailable here. Allow microphone access, or use "Check an audio file".';}
+};
+$('file').onchange=async e=>{
+  const f=e.target.files[0];if(!f)return;
+  try{ctx();stop();const buf=await ac.decodeAudioData(await f.arrayBuffer());
+    const s=ac.createBufferSource();s.buffer=buf;s.connect(an);an.connect(ac.destination);s.start();
+    stops.push(()=>{try{s.stop()}catch(e){}try{an.disconnect(ac.destination)}catch(e){}});
+    s.onended=()=>{finish()};begin('Checking "'+f.name+'" as it plays.');
+  }catch(err){$('status').textContent='Could not read that file. Try a WAV or MP3.';}
+  e.target.value='';
+};
+$('demo').onclick=()=>{
+  ctx();stop();const o=ac.createOscillator();o.type='sawtooth';o.frequency.value=128;
+  const g=ac.createGain();g.gain.value=.5;const lfo=ac.createOscillator(),lg=ac.createGain();lfo.frequency.value=3;lg.gain.value=.08;lfo.connect(lg);lg.connect(g.gain);
+  const out=ac.createGain();out.gain.value=.35;
+  [[700,5],[1220,6],[2600,8]].forEach(([f,q])=>{const b=ac.createBiquadFilter();b.type='bandpass';b.frequency.value=f;b.Q.value=q;o.connect(b);b.connect(g)});
+  const lp=ac.createBiquadFilter();lp.type='lowpass';lp.frequency.value=4500;g.connect(lp);lp.connect(out);out.connect(an);out.connect(ac.destination);
+  o.start();lfo.start();const t=setTimeout(()=>{finish()},14000);
+  stops.push(()=>{clearTimeout(t);o.stop();lfo.stop();out.disconnect()});
+  begin('Playing a synthetic test voice (constant pitch, band-limited).');
+};
+$('stop').onclick=stop;
+function finish(){stop();$('status').textContent='Finished. Final score '+(score==null?'not available (not enough speech)':Math.round(score))+'.';}
+
+function pitch(sr){
+  const a=Math.floor(sr/400),b=Math.floor(sr/75);let e0=0;for(let i=0;i<N;i++)e0+=td[i]*td[i];if(!e0)return null;
+  const c=[];let best=0;for(let l=a;l<=b;l++){let s=0;for(let i=0;i<N-l;i++)s+=td[i]*td[i+l];s/=e0;c[l]=s;if(s>best)best=s}
+  if(best<.5)return null;for(let l=a+1;l<b;l++)if(c[l]>=.9*best&&c[l]>=c[l-1]&&c[l]>=c[l+1])return sr/l;return null;}
+function pw(a,b){let s=0;for(let i=a;i<=b;i++)s+=Math.pow(10,fd[i]/10);return s/(b-a+1)}
+function push(arr,v,cap){arr.push(v);if(arr.length>cap)arr.shift()}
+
+function tick(){
+  an.getFloatTimeDomainData(td);an.getFloatFrequencyData(fd);
+  const sr=ac.sampleRate,bh=sr/N;let e=0;for(let i=0;i<N;i++)e+=td[i]*td[i];const rms=Math.sqrt(e/N);
+  sx.drawImage(sp,-2,0);sx.clearRect(sp.width-2,0,2,sp.height);sx.fillStyle=css('--ink');
+  const top=Math.min(N/2-1,Math.floor(8000/bh));
+  for(let y=0;y<sp.height;y+=2){const bin=Math.floor((sp.height-1-y)/sp.height*top);sx.globalAlpha=clamp((fd[bin]+100)/70);sx.fillRect(sp.width-2,y,2,2)}
+  sx.globalAlpha=1;
+  if(rms>.01){const f=pitch(sr);if(f){push(H.p,12*Math.log2(f),125);push(H.r,rms,125);
+    if(sr/2>=9000){const lo=Math.floor(300/bh),mid=Math.floor(4000/bh),h0=Math.floor(7000/bh),h1=Math.min(N/2-1,Math.floor(12000/bh));
+      push(H.hf,10*Math.log10(pw(h0,h1)/pw(lo,mid)+1e-12),125)}}}
+  else if(rms<.004)push(H.fl,20*Math.log10(rms+1e-9),60);
+  if(++ticks%12===0)evaluate();
+}
+
+function evaluate(){
+  if(H.p.length<30){$('status').textContent='Listening for speech. Keep talking for a few seconds.';return}
+  const P=H.p,m=P.reduce((a,b)=>a+b)/P.length,sd=Math.sqrt(P.reduce((a,b)=>a+(b-m)**2,0)/P.length);
+  const d=[];for(let i=1;i<P.length;i++){const x=Math.abs(P[i]-P[i-1]);if(x<4)d.push(x)}
+  const jt=d.length?d.reduce((a,b)=>a+b)/d.length:0;
+  const R=H.r,rm=R.reduce((a,b)=>a+b)/R.length,cv=Math.sqrt(R.reduce((a,b)=>a+(b-rm)**2,0)/R.length)/rm;
+  const I=[{k:'pv',w:.25,s:clamp((2.5-sd)/1.7),t:sd.toFixed(1)+' semitones'},
+           {k:'jt',w:.25,s:clamp((.6-jt)/.45),t:jt.toFixed(2)+' st / 40 ms'},
+           {k:'dy',w:.2,s:clamp((.55-cv)/.3),t:Math.round(cv*100)+'% variation'}];
+  if(H.hf.length>=20){const h=H.hf.reduce((a,b)=>a+b)/H.hf.length;I.push({k:'hf',w:.15,s:clamp((-48-h)/22),t:h.toFixed(0)+' dB'})}
+  if(H.fl.length>=15){const f=[...H.fl].sort((a,b)=>a-b)[Math.floor(H.fl.length/2)];I.push({k:'fl',w:.15,s:clamp((-65-f)/20),t:f.toFixed(0)+' dBFS'})}
+  const W=I.reduce((a,x)=>a+x.w,0),raw=100*I.reduce((a,x)=>a+x.w*x.s,0)/W;
+  score=score==null?raw:.7*score+.3*raw;
+  I.forEach(x=>{const el=document.querySelector('.ind[data-k="'+x.k+'"]');el.querySelector('.val').textContent=x.t;el.querySelector('i').style.width=Math.round(x.s*100)+'%'});
+  setVerdict(score);push(hist,score,120);drawTrace();
+  $('status').textContent='Analysing the last few seconds of speech.';
+  hits=score>=62?hits+1:0;
+  if(hits>=3&&!alerted){alerted=true;$('alert').style.display='block';if($('snd').checked)beep();if(navigator.vibrate)navigator.vibrate([200,100,200])}
+  if(alerted&&score<45){alerted=false;$('alert').style.display='none'}
+}
+function setVerdict(s){
+  const v=$('vtext');
+  if(s==null){v.textContent='Waiting for audio';v.style.color='var(--muted)';$('vnum').textContent='';return}
+  const r=Math.round(s);$('vnum').textContent='Synthetic likelihood '+r+' / 100';
+  if(s<35){v.textContent='Likely a real voice';v.style.color='var(--human)'}
+  else if(s<62){v.textContent='Not sure yet';v.style.color='var(--warn)'}
+  else{v.textContent='Possibly cloned or synthetic';v.style.color='var(--fake)'}
+}
+function drawTrace(){
+  const w=tr.width,h=tr.height;tx.clearRect(0,0,w,h);tx.strokeStyle=css('--line');tx.setLineDash([4,4]);tx.lineWidth=1;
+  [35,62].forEach(t=>{const y=h-t/100*h;tx.beginPath();tx.moveTo(0,y);tx.lineTo(w,y);tx.stroke()});tx.setLineDash([]);
+  const s=hist[hist.length-1];tx.strokeStyle=css(s<35?'--human':s<62?'--warn':'--fake');tx.lineWidth=2.5;tx.beginPath();
+  hist.forEach((v,i)=>{const x=i/119*w,y=h-v/100*h;i?tx.lineTo(x,y):tx.moveTo(x,y)});tx.stroke();
+}
+function beep(){try{const o=ac.createOscillator(),g=ac.createGain();o.frequency.value=880;g.gain.value=.12;o.connect(g);g.connect(ac.destination);o.start();o.stop(ac.currentTime+.3)}catch(e){}}
+</script>
+</body>
+</html>
