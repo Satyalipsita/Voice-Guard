@@ -156,7 +156,7 @@ function tick(){
 
 function evaluate(){
   if(H.p.length<30){$('status').textContent='Listening for speech. Keep talking for a few seconds.';return}
-  const P=H.p,m=P.reduce((a,b)=>a+b)/P.length,sd=Math.sqrt(P.reduce((a,b)=>a+(b-m)**2,0)/P.length);
+  const P0=H.p,P=P0.map((_,i)=>{const w=P0.slice(Math.max(0,i-2),i+3).sort((a,b)=>a-b);return w[w.length>>1]}),m=P.reduce((a,b)=>a+b)/P.length,sd=Math.sqrt(P.reduce((a,b)=>a+(b-m)**2,0)/P.length);
   const d=[];for(let i=1;i<P.length;i++){const x=Math.abs(P[i]-P[i-1]);if(x<4)d.push(x)}
   const jt=d.length?d.reduce((a,b)=>a+b)/d.length:0;
   const R=H.r,rm=R.reduce((a,b)=>a+b)/R.length,cv=Math.sqrt(R.reduce((a,b)=>a+(b-rm)**2,0)/R.length)/rm;
